@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 [Your Name or Organization]
+Copyright (c) 2026 Odeliya Cohen
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +19,37 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+================================================================================
+                        ACADEMIC INTEGRITY NOTICE
+================================================================================
+
+This software was developed as part of academic coursework and is shared for
+educational and portfolio purposes only.
+
+IMPORTANT NOTICE FOR STUDENTS:
+
+If you are currently enrolled in an Operating Systems course or any course that
+includes similar assignments, you are PROHIBITED from using, copying, or
+referencing this code in any way. Doing so constitutes a violation of academic
+integrity policies and may result in serious disciplinary action, including but
+not limited to:
+  - Course failure
+  - Academic probation
+  - Expulsion from your academic institution
+
+The author of this software:
+  1. Does NOT authorize students to use this code for coursework
+  2. Does NOT take any responsibility for academic integrity violations
+  3. Strongly encourages all students to complete their own work independently
+
+FAIR USE:
+This code may be reviewed by:
+  - Potential employers evaluating technical skills
+  - Educators for pedagogical purposes
+  - Researchers studying kernel programming techniques
+  - Developers learning about IPC mechanisms (after completing relevant coursework)
+
+By accessing or using this code, you acknowledge that you understand these
+restrictions and agree to use this software in compliance with academic
+integrity standards.

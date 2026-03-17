@@ -95,3 +95,23 @@ temp/
 *.tmp
 *.bak
 *.swp
+
+# Linux Kernel Module build artifacts
+*.ko
+*.mod.c
+*.mod
+*.o
+*.o.cmd
+*.ko.cmd
+*.mod.o
+*.mod.o.cmd
+.*.cmd
+.tmp_versions/
+modules.order
+Module.symvers
+*.markers
+*.order
+
+# User-space programs from kernel module
+Linux_Kernel_Module/message_sender
+Linux_Kernel_Module/message_reader
