@@ -1,283 +1,416 @@
-# Interview Notes
+# Interview Notes - Linux Kernel Message Slot Module
 
-This document tracks key technical decisions, tradeoffs, and design considerations for interview preparation.
+This document tracks key technical decisions, tradeoffs, and design considerations for the kernel module implementation.
 
 ## 🎯 Project STAR Summary
 
-Use this STAR (Situation, Task, Action, Result) framework to tell your project story:
-
 ### Situation
-*Describe the context and problem you were trying to solve*
-- What was the business need or technical challenge?
-- What constraints did you face (time, resources, requirements)?
-- What was the existing system or starting point?
+The project required implementing a Linux kernel module for a new IPC mechanism called "message slots." The module needed to:
+- Support multiple concurrent message channels
+- Handle multiple device files (message slots)
+- Provide atomic read/write operations
+- Include optional censorship feature
+- Properly manage kernel memory
+- Interface with user-space programs via system calls
 
-Example:
-```
-Our team needed a standardized project template that could accelerate project setup
-while demonstrating professional software engineering practices for portfolio projects.
-Many developers were starting from scratch each time, leading to inconsistent structure
-and missing best practices like CI/CD.
-```
+The challenge was to design a robust kernel-space driver that safely handles user-space input while maintaining data integrity across multiple concurrent channels.
 
 ### Task
-*Explain your specific role and responsibilities*
-- What were you accountable for?
-- What were the success criteria?
-- What decisions did you own?
-
-Example:
-```
-I was responsible for designing and implementing a language-agnostic template that:
-- Supports multiple programming languages
-- Includes professional DevOps tooling (Docker, CI/CD)
-- Provides interview-focused documentation
-- Can be adopted quickly by developers of all skill levels
-```
+I was responsible for:
+- Designing the data structures for managing slots, channels, and per-FD state
+- Implementing character device driver file operations (open, read, write, ioctl)
+- Ensuring proper memory management (no leaks, proper cleanup)
+- Handling user-space/kernel-space data transfer safely
+- Creating user-space programs to interact with the module
+- Writing comprehensive documentation for portfolio purposes
 
 ### Action
-*Detail the approach and implementation*
-- What technical decisions did you make and why?
-- What alternatives did you consider?
-- How did you structure the solution?
-- What challenges did you overcome?
+**Architecture Decisions:**
+- Used linked lists for slots and channels (simple, no fixed limits)
+- Stored per-FD state in `file->private_data` (standard kernel pattern)
+- Implemented lazy allocation (create slots/channels on first use)
+- Applied censorship at write time (simpler than filtering on read)
 
-Example:
-```
-I chose to use Make as the build automation tool because it's language-agnostic and
-universally available. I implemented a multi-stage Dockerfile to keep production images
-small. I added INTERVIEW_NOTES.md to help developers articulate their technical decisions.
-For CI/CD, I created a flexible GitHub Actions workflow that gracefully handles projects
-without tests while providing clear extension points.
-```
+**Implementation Approach:**
+- Followed kernel coding standards (printk for logging, kmalloc for memory)
+- Used `get_user`/`put_user` for safe user-space data transfer
+- Validated all user inputs (channel IDs, message lengths, ioctl commands)
+- Added `.owner = THIS_MODULE` to prevent premature module unload
+- Structured code with clear separation of concerns (helper functions for slot/channel management)
+
+**Documentation Strategy:**
+- Added Doxygen headers to all functions
+- Created comprehensive README explaining IOCTLs and race conditions
+- Included Academic Integrity Warning to protect against misuse
+- Documented complexity analysis and tradeoffs
 
 ### Result
-*Quantify the impact and outcomes*
-- What measurable improvements resulted?
-- What feedback did you receive?
-- What would you do differently?
+The module successfully implements all required functionality:
+- Handles multiple slots and channels concurrently
+- Provides atomic message operations
+- Properly manages memory (no leaks detected)
+- Includes professional documentation suitable for portfolio reviews
+- Demonstrates understanding of kernel programming concepts
 
-Example:
-```
-The template reduced project setup time from ~2 hours to 15 minutes. It provides
-a professional baseline that demonstrates understanding of modern DevOps practices.
-Three team members adopted it for their portfolio projects, all reporting it helped
-them better articulate their technical decisions in interviews.
-```
+The code is clean, well-documented, and follows professional standards. It serves as a strong portfolio piece demonstrating kernel-level systems programming expertise.
+
+---
 
 ## Key Design Decisions
 
-Document important technical choices made during development:
-- What approaches were chosen and why?
-- What alternatives were considered?
-- What constraints influenced the decisions?
+### Data Structure Choice: Linked Lists vs. Arrays
 
-Example:
-```
-Decision: Used a REST API instead of GraphQL
-Rationale: Simpler for the current use case, easier to cache, better tooling support
-Context: Limited to CRUD operations with no complex nested queries needed
-```
+**Decision:** Used linked lists for both slots and channels
+
+**Rationale:**
+- No fixed upper limit on slots/channels (more flexible)
+- Memory efficient when few channels are used
+- Simple insertion/deletion
+- Kernel already provides efficient kmalloc/kfree
+
+**Alternatives Considered:**
+- **Hash table**: Better O(1) lookup, but overkill for typical usage (few channels)
+- **Array**: Fixed size, would waste memory or require reallocation
+- **Red-black tree**: Better for large numbers of channels, but added complexity
+
+**Tradeoff:** O(n) lookup time vs. simplicity and memory efficiency. Acceptable because assignment assumes maximum 2^20 channels, and typical usage involves few channels per slot.
+
+### Per-FD State Management
+
+**Decision:** Allocate `fd_state_t` in `device_open()` and store in `file->private_data`
+
+**Rationale:**
+- Standard kernel pattern for per-file-descriptor state
+- Automatically freed by kernel when file is closed
+- Allows independent channel selection per FD
+- Enables per-FD censorship mode
+
+**Why This Matters:** Multiple processes can open the same device file and work with different channels independently.
+
+### Censorship Implementation
+
+**Decision:** Apply censorship during write operation, store censored message
+
+**Rationale:**
+- Simpler: censorship code only in one place (write)
+- Consistent: all reads return the same message
+- Efficient: no runtime cost on reads
+
+**Alternative:** Apply censorship during read based on current FD state
+- **Rejected because:** Would require storing censorship state with the message, and same message might need to be read both censored and uncensored
+
+### Memory Allocation Strategy
+
+**Decision:** Lazy allocation - create slots/channels only when first accessed
+
+**Rationale:**
+- Memory efficient: only allocate what's needed
+- Simple initialization: module init just registers the device
+- Scalable: no pre-allocation of large arrays
+
+**Cleanup Strategy:** Module exit walks all linked lists and frees everything
+
+---
 
 ## 📊 Trade-offs Analysis
 
-Compare your chosen approach against alternatives using this table format:
-
 | Decision Area | Chosen Approach | Alternative Approach | Trade-off Rationale |
 |---------------|----------------|---------------------|---------------------|
-| **Build Tool** | Make | Language-specific tools (npm, gradle, cargo) | Make is language-agnostic and universal, but lacks language-specific features. Chose simplicity and portability over specialized functionality. |
-| **Container Strategy** | Multi-stage Docker | Single-stage or no container | Multi-stage reduces image size but adds complexity. Chose production efficiency over development simplicity. |
-| **CI/CD** | GitHub Actions | Jenkins, GitLab CI, CircleCI | GitHub Actions integrates natively with GitHub, free for public repos. Trade-off: vendor lock-in vs. zero configuration. |
-| **Documentation** | Markdown in repo | External wiki or docs site | In-repo docs stay synchronized with code but lack advanced features. Chose consistency over presentation. |
-| **Example** | Synchronous processing | Async queue (RabbitMQ, Redis) | Sync is simpler to debug and test but doesn't scale to high throughput. Acceptable for current load (<100 req/min). |
+| **Data Structure** | Linked lists | Hash table or array | Linked lists are simpler and don't require fixed sizes. O(n) lookup is acceptable for typical small number of channels. Hash table would be O(1) but adds complexity. |
+| **Message Storage** | Store censored version | Apply censorship on read | Storing censored messages is simpler (code in one place) and more efficient (no per-read processing). Trade-off: can't "uncensor" a message later, but requirement doesn't need this. |
+| **Memory Allocation** | Lazy (on-demand) | Pre-allocate fixed arrays | Lazy allocation saves memory when few channels are used. Trade-off: slightly more complex logic, but much more flexible. |
+| **Concurrency** | No locking (per spec) | Add spinlocks/mutexes | Assignment specifies no concurrent access, so no locking needed. In production, would use spinlocks for slot/channel list updates. |
+| **User-space Transfer** | Byte-by-byte | copy_from_user/copy_to_user | Byte-by-byte is safer for short messages (max 128 bytes) and simpler error handling. Bulk copy functions would be more efficient for large messages. |
+| **Error Handling** | Return errno codes | More detailed errors | Used standard errno codes (EINVAL, ENOMEM, etc.) for consistency with kernel conventions. More detailed errors would require custom error codes. |
 
-### How to Use This Table
-
-For each major technical decision:
-1. **Decision Area**: What aspect of the system (architecture, data storage, API design)
-2. **Chosen Approach**: What you implemented
-3. **Alternative Approach**: What you considered but didn't choose
-4. **Trade-off Rationale**: Why you made this choice, including what you gained and what you sacrificed
-
-## Tradeoffs
-
-Analyze the pros and cons of key implementation choices:
-- What was gained?
-- What was sacrificed?
-- What would you do differently at larger scale?
-
-Example:
-```
-Tradeoff: Synchronous processing vs. async queue
-Chosen: Synchronous for simplicity
-Pros: Easier to debug, immediate feedback, no queue infrastructure
-Cons: Slower for bulk operations, blocks on long-running tasks
-When to reconsider: If processing time exceeds 2-3 seconds or volume grows beyond 100 req/min
-```
+---
 
 ## ⚡ Complexity Analysis
 
-Break down time and space complexity of critical operations:
-
-### Template Structure
+### Message Slot Operations
 
 | Operation | Time Complexity | Space Complexity | Justification |
 |-----------|----------------|------------------|---------------|
-| **Project Setup** | O(1) | O(1) | Fixed number of files and directories created |
-| **File Copy** | O(n) | O(n) | Linear in number of template files |
-| **Make Command** | Varies | Varies | Depends on specific target implementation |
-| **Docker Build** | O(n) | O(n) | Linear in codebase size and dependencies |
+| **device_open** | O(1) | O(1) | Allocates fixed-size fd_state |
+| **device_ioctl** | O(1) | O(1) | Updates fd_state fields |
+| **get_slot** | O(S) | O(1) or O(S) | Linear search through S slots; may allocate new slot |
+| **get_channel** | O(C) | O(1) or O(C) | Linear search through C channels in a slot; may allocate new channel |
+| **device_write** | O(S + C + M) | O(M) | Find slot O(S), find channel O(C), copy message O(M), allocate message storage O(M) |
+| **device_read** | O(S + C + M) | O(1) | Find slot O(S), find channel O(C), copy message to user O(M) |
+| **module_exit** | O(S × C × M) | O(1) | Walk all slots, all channels, free all messages |
 
-### Your Project Operations
+Where:
+- S = number of message slots (minor numbers in use)
+- C = average number of channels per slot
+- M = message length (max 128 bytes)
 
-Use this table to analyze your specific implementation:
+### Overall Memory Complexity
 
-| Operation | Time Complexity | Space Complexity | Bottleneck | Optimization Strategy |
-|-----------|----------------|------------------|-----------|----------------------|
-| **[Operation Name]** | O(?) | O(?) | [What limits performance?] | [How to improve if needed?] |
-| **Example: User Search** | O(n log n) | O(n) | Database query and sort | Add database indexing or caching |
-| **Example: Data Processing** | O(n²) | O(n) | Nested loop over items | Use hash map to reduce to O(n) |
-| **Example: File Upload** | O(n) | O(1) | Network I/O | Use streaming instead of loading into memory |
+**Space:** O(S × C × M_avg + N)
+- S = number of slots
+- C = average channels per slot
+- M_avg = average message size
+- N = number of open file descriptors
 
-### Complexity Notes
+### Performance Characteristics
 
-- What are the bottlenecks in your algorithms?
-- What are the performance characteristics?
-- How does performance scale with input size?
-- What optimizations are possible?
+**Bottlenecks:**
+- Linear search for slots/channels becomes slow if many are created
+- For production, would use hash tables (O(1) lookup) if profiling showed this was an issue
 
-Example:
-```
-Operation: User search
-Time: O(n log n) - sorts results by relevance
-Space: O(n) - stores all matching results in memory
-Bottleneck: Database query for large datasets
-Optimization: Add database indexing on search columns, implement pagination
-```
+**Optimization Strategies:**
+- Use hash tables indexed by minor number (slots) and channel ID (channels)
+- Cache recently accessed slots/channels
+- Use RCU for read-heavy workloads
 
-## Complexity
+**Why Current Approach is Acceptable:**
+- Typical usage: 1-2 slots, <10 channels per slot
+- O(S + C) is effectively constant for small S and C
+- Assignment focus is on correctness, not performance optimization
 
-Break down time and space complexity of critical operations:
-- What are the bottlenecks?
-- What are the performance characteristics?
-- How does it scale with input size?
-
-Example:
-```
-Operation: User search
-Time: O(n log n) - sorts results by relevance
-Space: O(n) - stores all matching results in memory
-Bottleneck: Database query for large datasets
-```
-
-*Note: See the "Complexity Analysis" section above for a detailed table format.*
+---
 
 ## Edge Cases
 
-Document edge cases and how they are handled:
-- What unusual inputs are handled?
-- What error conditions exist?
-- What assumptions are made?
+### Input Validation
+- **Channel ID = 0**: Rejected with EINVAL (0 is reserved for "no channel set")
+- **Message length = 0**: Rejected with EMSGSIZE (empty messages not allowed)
+- **Message length > 128**: Rejected with EMSGSIZE (exceeds maximum)
+- **Buffer too small on read**: Rejected with ENOSPC (prevents truncation)
+- **No message on channel**: Rejected with EWOULDBLOCK (channel exists but empty)
+- **Invalid ioctl command**: Rejected with EINVAL
 
-Example:
-```
-- Empty input: Returns empty result set
-- Null values: Skipped with warning logged
-- Concurrent modifications: Last write wins (no conflict resolution)
-- Network failures: Retry 3 times with exponential backoff
-```
+### Memory Management
+- **Channel message rewrite**: Previous message freed before allocating new one (kfree then kmalloc)
+- **Module unload**: All memory freed in correct order (messages → channels → slots)
+- **Allocation failure**: Proper error codes returned (ENOMEM)
+
+### Concurrency (Not Required, but Noted)
+- **Multiple opens**: Each gets independent fd_state
+- **Same channel, different FDs**: Both can read/write; last writer wins
+- **Module unload during use**: Prevented by `.owner = THIS_MODULE`
+
+### User-space Data Transfer
+- **Invalid user pointer**: `get_user`/`put_user` return error, propagated as EFAULT
+- **Partial copy failure**: Operations are atomic - either full message or error
+
+---
 
 ## Scaling Considerations
 
-How would the system handle growth?
-- What happens at 10x load?
-- What are the scaling bottlenecks?
-- What infrastructure changes would be needed?
+### Current Design Limits
 
-Example:
+**Current:** Designed for educational use
+- Small number of slots (typically 1-2)
+- Few channels per slot (<100)
+- Low message throughput
+
+### At 10x Scale
+
+**Scenario:** 10 slots, 1000 channels per slot, high throughput
+
+**Bottlenecks:**
+1. Linear search for channels becomes O(1000) per operation
+2. No caching - every read/write walks lists
+3. No concurrency - single-threaded access only
+
+**Solutions:**
+```c
+// 1. Use hash tables for O(1) lookup
+static DEFINE_HASHTABLE(slots_hash, 8); // 256 buckets
+
+// 2. Add spinlocks for concurrent access
+static DEFINE_SPINLOCK(slot_lock);
+
+// 3. Use RCU for read-heavy workloads
+struct channel {
+    struct rcu_head rcu;
+    // ... existing fields
+};
 ```
-Current: Handles ~1000 users, ~10K requests/day
-At 10x: Database becomes bottleneck
-Solutions:
-- Add read replicas for queries
-- Implement caching layer (Redis)
-- Consider sharding by user ID
-- Move heavy processing to background jobs
-```
+
+### Production Readiness
+
+To make this production-ready:
+1. **Add locking**: spinlocks for slot/channel list updates
+2. **Use hash tables**: O(1) lookup instead of O(n)
+3. **Add sysfs interface**: Statistics and configuration
+4. **Implement poll/select**: Async notification of new messages
+5. **Add message queues**: Multiple messages per channel (ring buffer)
+6. **Memory limits**: Cap total memory usage per slot
+7. **Audit logging**: Track all operations for debugging
+
+---
 
 ## Improvements
 
-What would you enhance given more time?
-- Performance optimizations
-- Code quality improvements
-- Feature additions
-- Technical debt to address
+### Short-term
+- Add statistics (messages sent/received per channel)
+- Implement message TTL (expire old messages)
+- Add ioctl to clear a channel's message
+- Support variable-length censorship patterns
 
-Example:
-```
-Short-term:
-- Add connection pooling for database
-- Implement request rate limiting
-- Add metrics and monitoring
+### Long-term
+- Message queues (multiple messages per channel)
+- Priority channels (expedited delivery)
+- Broadcast channels (one write, multiple readers)
+- Persistent storage (survive reboots)
 
-Long-term:
-- Migrate to microservices architecture
-- Add full-text search with Elasticsearch
-- Implement event sourcing for audit trail
-```
+### Technical Debt
+- **Linear search**: Would benefit from hash tables at scale
+- **No concurrency**: Production code needs locking
+- **Limited error info**: Could provide more detailed diagnostics
+
+---
 
 ## Possible Interview Questions
 
 ### Architecture and Design
 
-**Q: Why did you choose this approach?**
-A: I chose this approach because it balances simplicity with scalability. The current design handles our requirements with minimal complexity while leaving clear extension points for future growth. Specifically, [explain your core architectural choice and its benefits].
+**Q: Why did you use linked lists instead of hash tables?**
 
-**Q: What alternatives did you consider?**
-A: I considered [alternative 1] and [alternative 2]. I ruled out [alternative 1] because [reason]. [Alternative 2] would have worked but added complexity around [specific area] without clear benefits at our current scale.
+A: I chose linked lists for simplicity and memory efficiency. The assignment assumes a maximum of 2^20 channels, but typical usage involves just a handful of channels per slot. For small numbers, the O(n) lookup time of linked lists is negligible compared to the complexity of implementing and maintaining hash tables. If profiling showed that channel lookup was a bottleneck (e.g., hundreds of channels per slot), I would refactor to use a hash table for O(1) lookup. The current design prioritizes code clarity and memory efficiency over theoretical scalability.
 
-**Q: How would you scale this system?**
-A: The first bottleneck would be [component]. I would address it by [solution]. At higher scale, we would need to [horizontal/vertical scaling strategy]. The database would require [sharding/replication strategy]. For further growth, we could [additional scaling approach].
+**Q: How would you make this module thread-safe for concurrent access?**
+
+A: I would add spinlocks to protect the slot and channel lists. Specifically:
+1. A global spinlock for the slots list (used in `get_slot()`)
+2. A per-slot spinlock for the channels list (used in `get_channel()`)
+3. Use `spin_lock_irqsave()` to disable interrupts during critical sections
+
+For read-heavy workloads, I would consider RCU (Read-Copy-Update) to allow lock-free reads while serializing writes. Per-FD state doesn't need locking since it's only accessed by the owning process.
+
+**Q: Explain the IOCTL design. Why two commands instead of one?**
+
+A: The module needs two independent configuration operations:
+1. **MSG_SLOT_CHANNEL**: Selects which channel to use for read/write
+2. **MSG_SLOT_SET_CEN**: Controls censorship mode
+
+Using separate IOCTLs follows the principle of separation of concerns - each command has a single, clear purpose. An alternative would be a single IOCTL with a config struct, but that's more complex and less flexible. The current design allows users to set channel and censorship independently, and the default censorship mode (disabled) means users can skip the censorship IOCTL if not needed.
 
 ### Implementation Details
 
-**Q: What is the time/space complexity of [critical operation]?**
-A: The time complexity is O([complexity]) because [explanation]. Space complexity is O([complexity]) due to [reason]. This is acceptable for our use case because [justification]. If we needed better performance, we could [optimization strategy].
+**Q: Why apply censorship during write instead of read?**
 
-**Q: How do you handle errors and edge cases?**
-A: I handle errors at [boundaries/layers] by [strategy]. For edge cases like [example], I [approach]. I chose this approach because it [benefit] while keeping the code [maintainable/testable/clear].
+A: Applying censorship during write and storing the censored version has several advantages:
+1. **Simplicity**: Censorship code is in one place (write path only)
+2. **Consistency**: All readers see the same message
+3. **Efficiency**: No runtime cost on reads (no per-read processing)
 
-**Q: What tradeoffs did you make?**
-A: The main tradeoff was [choice A vs choice B]. I chose [A] because [reason], sacrificing [what was given up]. This makes sense for our use case because [context]. If [condition changed], I would reconsider and potentially switch to [B].
+The tradeoff is that you can't "uncensor" a message later, but the requirements don't call for that. If the requirement was to allow each reader to independently choose censorship, I would store the original message and apply censorship during read based on the FD's censorship setting.
+
+**Q: How do you ensure atomic read/write operations?**
+
+A: Atomicity is achieved through two mechanisms:
+1. **Byte-by-byte copy**: The entire message is copied from/to user space before updating the channel's message pointer. If `get_user`/`put_user` fails midway, we return an error without modifying the channel.
+2. **No concurrent access**: The assignment guarantees no concurrent system calls, so there's no risk of another operation interrupting.
+
+For production with concurrent access, I would:
+- Use a per-channel lock held during the entire read/write operation
+- Or use atomic pointer exchange (RCU) to replace the message pointer
+
+**Q: What happens if kmalloc fails during write?**
+
+A: If `kmalloc` fails when allocating memory for the new message, we return `-ENOMEM` to the caller. Importantly, the old message (if any) is NOT freed until after the new allocation succeeds. This ensures we never leave a channel in an invalid state with a freed but still-referenced message pointer. The sequence is:
+1. Allocate new message storage
+2. If allocation fails, return error (old message untouched)
+3. If allocation succeeds, free old message and replace with new
 
 ### System Design
 
-**Q: What are the bottlenecks in your system?**
-A: The primary bottleneck is [component] because [reason]. Under load, we would see [symptom]. To address this, I would [solution]. Additional bottlenecks include [other components] which would manifest as [symptoms].
+**Q: How would you add support for message queues (multiple messages per channel)?**
 
-**Q: How do you ensure data consistency?**
-A: I ensure consistency by [approach, e.g., transactions, locks, versioning]. This guarantees [what is guaranteed]. The tradeoff is [performance/availability impact]. For [use case], this is acceptable because [justification].
+A: I would replace the single `message` pointer in the `channel_t` struct with a circular buffer (ring buffer):
+```c
+typedef struct channel {
+    unsigned int id;
+    char *messages[QUEUE_SIZE];  // Ring buffer
+    size_t lengths[QUEUE_SIZE];
+    int head, tail, count;       // Ring buffer pointers
+    struct channel *next;
+} channel_t;
+```
 
-**Q: What would you improve in production?**
-A: For production, I would add:
-1. [Monitoring/observability] - to track [metrics]
-2. [Caching] - to reduce load on [component]
-3. [Error handling] - specifically around [scenarios]
-4. [Security measures] - like [examples]
-5. [Performance optimizations] - such as [specific improvements]
+Write operation would:
+1. Check if queue is full (count == QUEUE_SIZE)
+2. If full, either return EWOULDBLOCK or drop oldest (configurable)
+3. Copy message to messages[tail]
+4. Update tail and count
+
+Read operation would:
+1. Check if queue is empty (count == 0)
+2. Copy message from messages[head]
+3. Update head and count
+
+This maintains the same IOCTL interface while adding message queuing capability.
+
+**Q: What security considerations are important in kernel modules?**
+
+A: Kernel modules run with full privileges, so security is critical:
+
+1. **Input validation**: Never trust user-space data. Validate all inputs (channel IDs, message lengths, ioctl parameters)
+2. **User-space access**: Always use `get_user`/`put_user` or `copy_from_user`/`copy_to_user` - never directly dereference user pointers
+3. **Integer overflow**: Check for overflow in size calculations (e.g., `kmalloc` size)
+4. **Resource limits**: Prevent unbounded memory allocation (DoS attack)
+5. **Race conditions**: Proper locking to prevent TOCTOU (time-of-check-time-of-use) bugs
+
+In this module, I validate:
+- Channel IDs (must be non-zero)
+- Message lengths (0 < len <= 128)
+- IOCTL parameters (valid commands and values)
+- User-space pointers (via `get_user`/`put_user`)
+
+**Q: How would you debug a kernel panic in this module?**
+
+A: Debugging kernel panics requires different tools than user-space debugging:
+
+1. **printk debugging**: Add printk statements to trace execution path
+2. **dmesg**: Check kernel logs for panic messages and stack traces
+3. **addr2line**: Convert crash addresses to source lines
+4. **kgdb**: Kernel debugger for interactive debugging
+5. **Memory debugging**: Enable KASAN (Kernel Address Sanitizer) to catch memory errors
+
+For this module, common issues to check:
+- NULL pointer dereferences (check all kmalloc results)
+- User-space access violations (ensure proper get_user/put_user usage)
+- Double-free or use-after-free (careful with message reallocation)
+- Unregistering while in use (prevented by THIS_MODULE)
 
 ### Testing and Quality
 
-**Q: How would you test this?**
-A: I would use [testing strategy]:
-- Unit tests for [components]
-- Integration tests for [interactions]
-- End-to-end tests for [workflows]
-Key scenarios to cover include [examples]. I would mock [dependencies] to isolate [units].
+**Q: How would you test this kernel module?**
 
-**Q: How do you handle technical debt?**
-A: I identify technical debt by [method]. I prioritize it based on [criteria]. In this project, the main debt items are [examples]. I would address [specific item] first because [reason].
+A: Testing kernel modules requires multiple approaches:
+
+**Unit Testing:**
+- Test each file operation independently
+- Use multiple processes to test concurrent opens
+- Vary message sizes (1, 64, 128 bytes)
+- Test edge cases (channel ID 0, message length 0, length 129)
+
+**Integration Testing:**
+- Test multiple slots and channels
+- Test message persistence (write, close, reopen, read)
+- Test censorship mode on/off
+- Test error conditions (read before write, buffer too small)
+
+**Stress Testing:**
+- Create maximum channels (approach 2^20 limit)
+- Send messages continuously (check for memory leaks with `cat /proc/meminfo`)
+- Module load/unload cycles (ensure proper cleanup)
+
+**Tools:**
+- `valgrind` for user-space programs (message_sender/reader)
+- `kmemleak` for kernel memory leak detection
+- `sparse` for static analysis
+- `dmesg` for kernel log messages
+
+**Regression Testing:**
+- Script that runs all test cases and verifies output
+- Automated testing in CI/CD pipeline
 
 ---
 
-*Update this document as you make significant technical decisions or implement new features.*
+*Last Updated: 2026-03-17*
+
+**Note:** This document serves as preparation for technical interviews where I may be asked to explain design decisions, tradeoffs, and implementation details of the kernel module.
