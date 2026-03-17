@@ -5,25 +5,6 @@
 [![Language](https://img.shields.io/badge/Language-C-blue.svg)]()
 
 > A Linux kernel module implementing a character device driver for inter-process communication (IPC) via message slots with multiple concurrent channels.
-
-## ⚠️ ACADEMIC INTEGRITY WARNING
-
-**THIS REPOSITORY IS FOR PORTFOLIO AND EDUCATIONAL PURPOSES ONLY.**
-
-If you are a student currently enrolled in an Operating Systems course or any course with similar kernel programming assignments, **copying or referencing this code violates academic integrity policies**.
-
-**I DO NOT take responsibility for any disciplinary actions taken against individuals who misuse this code.**
-
-Potential consequences of academic misconduct include:
-- Course failure (grade of 250 or "did not complete course requirements")
-- Academic probation
-- Expulsion from your academic institution
-- Permanent record of dishonesty
-
-**This code is meant to be reviewed by employers, educators, and researchers - NOT copied by students for coursework.**
-
-See the [LICENSE](./LICENSE) file for the full Academic Integrity Notice.
-
 ---
 
 ## 🎯 Project Overview
@@ -701,6 +682,12 @@ Kernel-Development-Lab/
 
 ---
 
+## ⚠️ Academic Integrity Notice
+
+**This repository is for portfolio and educational purposes only.** If you are a student currently taking an Operating Systems course, copying this code violates academic integrity policies. I do not take responsibility for disciplinary actions against individuals who misuse this code.
+See the [LICENSE](./LICENSE) file for the full Academic Integrity Notice.
+
+---
 ## 📝 License
 
 This project is licensed under the MIT License with an Academic Integrity Notice.
@@ -709,27 +696,6 @@ This project is licensed under the MIT License with an Academic Integrity Notice
 
 See [LICENSE](./LICENSE) for full terms and the Academic Integrity Notice.
 
----
 
-## 👤 Author
-
-**Odeliya Cohen**
-
-This project was completed as part of Operating Systems coursework and demonstrates:
-- Linux kernel programming expertise
-- Understanding of IPC mechanisms
-- Clean code practices and documentation
-- Systems programming skills
-
----
-
-## 🤝 Contributing
-
-This is a portfolio project and not accepting contributions. However, feel free to:
-- Fork for learning purposes (after completing your own coursework)
-- Report bugs or suggest improvements via issues
-- Use as a reference for understanding kernel modules
-
----
 
 **Note**: This README provides comprehensive documentation for technical interviews and portfolio reviews. For the original assignment specification, see `docs/instructions_kernel.txt`.
