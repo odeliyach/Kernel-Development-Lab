@@ -29,7 +29,7 @@
 #include <linux/uaccess.h>  /* User space memory access (get_user, put_user) */
 #include <linux/slab.h>     /* Memory allocation (kmalloc, kfree) */
 
-#include "message_slot.h"
+#include "../include/message_slot.h"
 
 MODULE_LICENSE("GPL");
 

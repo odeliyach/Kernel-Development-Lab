@@ -21,7 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
-#include "message_slot.h"
+#include "../include/message_slot.h"
 
 /**
  * @brief Main function for the message sender program
