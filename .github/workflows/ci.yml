@@ -1,0 +1,174 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Run Linter
+      run: |
+        if [ -f "Makefile" ] && make -n lint > /dev/null 2>&1; then
+          echo "Running: make lint"
+          make lint
+        else
+          echo "No linter configured yet. Add 'make lint' target to enable linting."
+          exit 0
+        fi
+      continue-on-error: true
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    # Optional: Matrix testing across multiple versions
+    # strategy:
+    #   matrix:
+    #     version: ['3.9', '3.10', '3.11']  # Example for Python
+    #     # version: ['18', '20', '21']      # Example for Node.js
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    # Optional: Setup language runtime for matrix testing
+    # - name: Set up Python ${{ matrix.version }}
+    #   uses: actions/setup-python@v4
+    #   with:
+    #     python-version: ${{ matrix.version }}
+
+    # - name: Set up Node.js ${{ matrix.version }}
+    #   uses: actions/setup-node@v3
+    #   with:
+    #     node-version: ${{ matrix.version }}
+
+    - name: Run Tests
+      id: test
+      run: |
+        if [ -f "Makefile" ]; then
+          echo "Found Makefile, attempting to run tests..."
+          if make -n test > /dev/null 2>&1; then
+            echo "Running: make test"
+            make test
+          elif make -n all > /dev/null 2>&1; then
+            echo "Running: make all"
+            make all
+          elif make -n > /dev/null 2>&1; then
+            echo "Running: make (default target)"
+            make
+          else
+            echo "No suitable make target found. Add your tests to the tests/ directory"
+            exit 0
+          fi
+        else
+          echo "No Makefile found. Add a Makefile with a 'test' target to enable automated testing."
+          exit 0
+        fi
+
+    # Optional: Generate and upload test coverage
+    # - name: Generate Coverage Report
+    #   if: success()
+    #   run: |
+    #     # Add coverage command for your language
+    #     # Python: pytest --cov=src --cov-report=xml
+    #     # Node.js: npm run coverage
+    #     # Go: go test -coverprofile=coverage.out ./...
+    #     echo "TODO: Configure coverage reporting"
+
+    # - name: Upload Coverage
+    #   if: success()
+    #   uses: codecov/codecov-action@v3
+    #   with:
+    #     file: ./coverage.xml  # Adjust path based on your coverage tool
+
+    # Optional: Comment test results on PR
+    # - name: Comment Test Results
+    #   if: github.event_name == 'pull_request' && always()
+    #   uses: actions/github-script@v6
+    #   with:
+    #     script: |
+    #       const output = `#### Test Results 🧪
+    #       - **Status**: ${{ steps.test.outcome }}
+    #
+    #       Add coverage metrics here once configured.`;
+    #
+    #       github.rest.issues.createComment({
+    #         issue_number: context.issue.number,
+    #         owner: context.repo.owner,
+    #         repo: context.repo.repo,
+    #         body: output
+    #       });
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Build Project
+      run: |
+        if [ -f "Makefile" ] && make -n build > /dev/null 2>&1; then
+          echo "Running: make build"
+          make build
+        else
+          echo "No build target found. Add 'make build' target if your project requires compilation."
+          exit 0
+        fi
+      continue-on-error: true
+
+    # Optional: Upload build artifacts
+    # - name: Upload Artifacts
+    #   if: success()
+    #   uses: actions/upload-artifact@v3
+    #   with:
+    #     name: build-artifacts
+    #     path: |
+    #       dist/
+    #       build/
+    #       target/
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    # Security scanning for dependencies
+    - name: Run Dependency Check
+      run: |
+        echo "Security scanning..."
+        echo "TODO: Add security scanning for your package manager"
+        echo "Examples:"
+        echo "  - Python: pip-audit or safety check"
+        echo "  - Node.js: npm audit"
+        echo "  - Go: go list -json -m all | nancy sleuth"
+        echo "  - Java: mvn org.owasp:dependency-check-maven:check"
+      continue-on-error: true
+
+    # Optional: Additional security tools
+    # - name: Run Trivy vulnerability scanner
+    #   uses: aquasecurity/trivy-action@master
+    #   with:
+    #     scan-type: 'fs'
+    #     scan-ref: '.'
+    #     format: 'sarif'
+    #     output: 'trivy-results.sarif'
+
+    # - name: Upload Trivy results to GitHub Security
+    #   uses: github/codeql-action/upload-sarif@v2
+    #   with:
+    #     sarif_file: 'trivy-results.sarif'
