@@ -211,6 +211,323 @@ device_read() → get_slot() → get_channel() → copy to user
 
 ---
 
+## 🔧 System Architecture
+
+This section explains how the message slot system's components interact, from user-space applications down to kernel data structures.
+
+### High-Level Component Interaction
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      User Space                              │
+│  ┌──────────────────┐              ┌──────────────────┐    │
+│  │ message_sender   │              │ message_reader   │    │
+│  │                  │              │                  │    │
+│  │ 1. open()        │              │ 1. open()        │    │
+│  │ 2. ioctl()       │              │ 2. ioctl()       │    │
+│  │ 3. write()       │              │ 3. read()        │    │
+│  │ 4. close()       │              │ 4. close()       │    │
+│  └────────┬─────────┘              └────────┬─────────┘    │
+└───────────┼────────────────────────────────┼───────────────┘
+            │                                │
+            │      System Call Interface     │
+            │                                │
+┌───────────┼────────────────────────────────┼───────────────┐
+│           ▼         Kernel Space           ▼               │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │         Character Device Driver (message_slot)       │  │
+│  │                                                      │  │
+│  │  ┌──────────────┐  ┌────────────────────────────┐  │  │
+│  │  │ device_open  │  │  device_ioctl              │  │  │
+│  │  │              │  │  • MSG_SLOT_CHANNEL        │  │  │
+│  │  │ Allocates    │  │  • MSG_SLOT_SET_CEN        │  │  │
+│  │  │ fd_state     │  │                            │  │  │
+│  │  └──────────────┘  │  Sets per-FD state:        │  │  │
+│  │                    │  - channel_id               │  │  │
+│  │  ┌──────────────┐  │  - censor mode             │  │  │
+│  │  │ device_write │  └────────────────────────────┘  │  │
+│  │  │              │                                   │  │
+│  │  │ 1. copy_from_user()                            │  │
+│  │  │ 2. Apply censorship (if enabled)               │  │
+│  │  │ 3. get_slot() → get_channel()                  │  │
+│  │  │ 4. Store message                               │  │
+│  │  └──────┬───────┘                                  │  │
+│  │         │                                          │  │
+│  │         ▼                                          │  │
+│  │  ┌────────────────────────────────────────────┐   │  │
+│  │  │         Data Structure Layer              │   │  │
+│  │  │                                           │   │  │
+│  │  │  Global: slots (linked list)             │   │  │
+│  │  │     │                                     │   │  │
+│  │  │     ├─► slot_t (minor=0)                 │   │  │
+│  │  │     │      └─► channel_t (id=1) ──► msg  │   │  │
+│  │  │     │      └─► channel_t (id=2) ──► msg  │   │  │
+│  │  │     │                                     │   │  │
+│  │  │     └─► slot_t (minor=1)                 │   │  │
+│  │  │            └─► channel_t (id=1) ──► msg  │   │  │
+│  │  │                                           │   │  │
+│  │  └────────────────────────────────────────────┘   │  │
+│  │         ▲                                          │  │
+│  │         │                                          │  │
+│  │  ┌──────┴───────┐                                 │  │
+│  │  │ device_read  │                                 │  │
+│  │  │              │                                 │  │
+│  │  │ 1. get_slot() → get_channel()                 │  │
+│  │  │ 2. copy_to_user()                             │  │
+│  │  └──────────────┘                                 │  │
+│  └──────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+```
+
+### System Call Deep Dive
+
+#### 1. **IOCTL System Calls**
+
+IOCTLs configure the behavior of file descriptors without transferring data. The message slot driver uses two IOCTL commands:
+
+**MSG_SLOT_CHANNEL (`_IOW(235, 0, unsigned int)`)**
+- **Purpose**: Associate a channel ID with the file descriptor
+- **Flow**:
+  1. User calls `ioctl(fd, MSG_SLOT_CHANNEL, channel_id)`
+  2. Kernel validates `channel_id != 0`
+  3. Stores `channel_id` in `file->private_data->channel_id`
+  4. Returns 0 on success, -EINVAL on failure
+- **Effect**: All subsequent read/write operations on this FD use this channel
+- **Per-FD State**: Each file descriptor maintains its own channel selection
+
+**MSG_SLOT_SET_CEN (`_IOW(235, 1, unsigned int)`)**
+- **Purpose**: Enable/disable censorship mode for the file descriptor
+- **Flow**:
+  1. User calls `ioctl(fd, MSG_SLOT_SET_CEN, mode)` where mode is 0 or 1
+  2. Kernel validates mode value
+  3. Stores censorship flag in `file->private_data->censor`
+  4. Returns 0 on success, -EINVAL on invalid mode
+- **Effect**: When enabled, every 4th character (indices 3, 7, 11, ...) becomes '#' during write operations
+- **Per-FD State**: Censorship is independent per file descriptor
+
+**Why IOCTLs?**
+- Configuration operations don't fit the read/write model
+- Allows setting parameters without data transfer
+- Type-safe: `_IOW` macro ensures correct parameter type
+- Extensible: Easy to add new commands without breaking compatibility
+
+#### 2. **WRITE System Call**
+
+Writing a message involves data transfer from user space to kernel space and storage in channel data structures.
+
+**Flow (`device_write`):**
+
+```
+User: write(fd, message, len)
+  │
+  ├─► Kernel Entry: device_write(file, buffer, len, offset)
+  │
+  ├─► [1] Validate File Descriptor State
+  │      • Check: channel_id != 0 (must call ioctl first)
+  │      • Return -EINVAL if no channel set
+  │
+  ├─► [2] Validate Message Length
+  │      • Check: 0 < len ≤ MAX_MESSAGE_LEN (128 bytes)
+  │      • Return -EMSGSIZE if invalid
+  │
+  ├─► [3] Copy from User Space
+  │      • Allocate kernel buffer: kmalloc(len, GFP_KERNEL)
+  │      • Return -ENOMEM if allocation fails
+  │      • Copy data: copy_from_user(kernel_buf, buffer, len)
+  │      • Return -EFAULT if copy fails (bad user pointer)
+  │
+  ├─► [4] Apply Censorship (if enabled)
+  │      • If state->censor == 1:
+  │      •   for i in {3, 7, 11, 15, ...}: kernel_buf[i] = '#'
+  │
+  ├─► [5] Navigate Data Structures
+  │      • slot = get_slot(minor_number)
+  │      •   Creates new slot if doesn't exist
+  │      • channel = get_channel(slot, channel_id)
+  │      •   Creates new channel if doesn't exist
+  │
+  ├─► [6] Store Message in Channel
+  │      • If channel->message exists: kfree(old_message)
+  │      • channel->message = kernel_buf
+  │      • channel->len = len
+  │
+  └─► [7] Return Success
+         • Return len (number of bytes written)
+```
+
+**Key Points:**
+- **Atomic Operation**: Entire message stored or none of it (no partial writes)
+- **Overwrite Semantics**: New message replaces old message in channel
+- **Memory Safety**: User-space pointers never directly dereferenced
+- **Error Handling**: All allocations and copies checked; cleanup on failure
+
+#### 3. **READ System Call**
+
+Reading retrieves a message from kernel space and transfers it to user space.
+
+**Flow (`device_read`):**
+
+```
+User: n = read(fd, buffer, MAX_MESSAGE_LEN)
+  │
+  ├─► Kernel Entry: device_read(file, buffer, len, offset)
+  │
+  ├─► [1] Validate File Descriptor State
+  │      • Check: channel_id != 0
+  │      • Return -EINVAL if no channel set
+  │
+  ├─► [2] Navigate Data Structures
+  │      • slot = get_slot(minor_number)
+  │      • Return -EINVAL if slot doesn't exist
+  │      • channel = get_channel(slot, channel_id)
+  │      • Return -EINVAL if channel doesn't exist
+  │
+  ├─► [3] Check Message Existence
+  │      • if channel->message == NULL:
+  │      •   Return -EWOULDBLOCK (no message in channel)
+  │
+  ├─► [4] Validate Buffer Size
+  │      • if len < channel->len:
+  │      •   Return -ENOSPC (buffer too small)
+  │
+  ├─► [5] Copy to User Space
+  │      • copy_to_user(buffer, channel->message, channel->len)
+  │      • Return -EFAULT if copy fails (bad user pointer)
+  │
+  └─► [6] Return Success
+         • Return channel->len (number of bytes read)
+```
+
+**Key Points:**
+- **Non-Destructive Read**: Message remains in channel after reading
+- **No Partial Reads**: User buffer must be large enough for entire message
+- **Message Persistence**: Messages survive process termination
+- **Error Codes**:
+  - `-EINVAL`: Channel not set or doesn't exist
+  - `-EWOULDBLOCK`: Channel exists but has no message
+  - `-ENOSPC`: User buffer too small
+  - `-EFAULT`: Bad user-space pointer
+
+### Data Structure Interaction
+
+**Hierarchical Storage:**
+
+```
+1. File Descriptor (User Space)
+   │
+   ├─► file->private_data (Per-FD State)
+   │     ├─► channel_id: Which channel this FD uses
+   │     └─► censor: Whether censorship is enabled
+   │
+   └─► iminor(file->f_inode) (Device Minor Number)
+         │
+         ├─► Determines which slot_t to use
+         │
+         └─► slot_t (Kernel Space - Per Device)
+               ├─► minor: Device minor number
+               ├─► channels: Linked list of channels
+               │
+               └─► channel_t (Per Channel ID)
+                     ├─► id: Channel identifier
+                     ├─► message: Stored message buffer
+                     ├─► len: Message length
+                     └─► next: Next channel in list
+```
+
+**Lookup Process:**
+
+1. **File Descriptor → Minor Number**
+   - Extract: `minor = iminor(file->f_inode)`
+   - Identifies which device file (e.g., /dev/slot0 vs /dev/slot1)
+
+2. **Minor Number → Slot**
+   - Search global `slots` linked list
+   - Match: `slot->minor == minor`
+   - Create new slot if not found (lazy allocation)
+
+3. **Channel ID → Channel**
+   - Search `slot->channels` linked list
+   - Match: `channel->id == channel_id`
+   - Create new channel if not found (lazy allocation)
+
+4. **Channel → Message**
+   - Direct access: `channel->message` and `channel->len`
+   - Stored in kernel heap (allocated with `kmalloc`)
+
+**Memory Lifecycle:**
+
+```
+Module Load
+  │
+  ├─► slots = NULL (empty global list)
+  │
+First write() to /dev/slot0, channel 1
+  │
+  ├─► get_slot(0)
+  │     └─► Creates slot_t with minor=0
+  │           └─► Adds to global slots list
+  │
+  ├─► get_channel(slot, 1)
+  │     └─► Creates channel_t with id=1
+  │           └─► Adds to slot->channels list
+  │
+  ├─► Allocates message buffer
+  │     └─► channel->message = kmalloc(len)
+  │
+Subsequent write() to same channel
+  │
+  ├─► Finds existing slot and channel
+  │
+  ├─► Frees old message: kfree(channel->message)
+  │
+  └─► Allocates new message: channel->message = kmalloc(new_len)
+
+Module Unload
+  │
+  ├─► For each slot in slots:
+  │     ├─► For each channel in slot->channels:
+  │     │     ├─► kfree(channel->message)
+  │     │     └─► kfree(channel)
+  │     └─► kfree(slot)
+  │
+  └─► slots = NULL
+```
+
+### Concurrency and Safety Considerations
+
+**Single-Threaded Assumption:**
+This implementation assumes no concurrent system calls (per assignment specification). In production, you would need:
+
+```c
+// Production example (not required for this assignment):
+static DEFINE_SPINLOCK(slots_lock);
+static DEFINE_SPINLOCK(channel_lock);
+
+static ssize_t device_write(...) {
+    unsigned long flags;
+
+    spin_lock_irqsave(&slots_lock, flags);
+    // Critical section: access/modify slots and channels
+    spin_unlock_irqrestore(&slots_lock, flags);
+
+    return len;
+}
+```
+
+**Memory Safety:**
+- ✅ **No Direct User Pointer Dereference**: Always use `copy_from_user`/`copy_to_user`
+- ✅ **Allocation Checks**: All `kmalloc` calls checked before use
+- ✅ **Buffer Overflow Prevention**: Length validated before copy operations
+- ✅ **Reference Counting**: `.owner = THIS_MODULE` prevents module unload during use
+
+**Error Handling Strategy:**
+- **Validate Early**: Check all preconditions before allocation
+- **Clean Up on Failure**: Free partial allocations on error paths
+- **Return Standard Errno**: Use standard error codes (-EINVAL, -ENOMEM, etc.)
+- **Atomic Operations**: Either complete successfully or leave no side effects
+
+---
+
 ## 🚀 Building and Testing
 
 ### Prerequisites
@@ -222,14 +539,24 @@ device_read() → get_slot() → get_channel() → copy to user
 ### Build Instructions
 
 ```bash
-cd Linux_Kernel_Module
-make all
+# Build everything (kernel module and user applications)
+make
+
+# Or build individual components:
+make module        # Build only the kernel module
+make user_programs # Build only the user applications
+
+# Clean all build artifacts
+make clean
+
+# Show help
+make help
 ```
 
 This builds:
-- `message_slot.ko` - Kernel module
-- `message_sender` - User-space sender program
-- `message_reader` - User-space reader program
+- `message_slot.ko` - Kernel module (in root directory)
+- `user_apps/message_sender` - User-space sender program
+- `user_apps/message_reader` - User-space reader program
 
 ### Installation and Testing
 
@@ -247,7 +574,7 @@ sudo chmod 666 /dev/slot0 /dev/slot1
 
 **3. Send a Message (No Censorship):**
 ```bash
-./message_sender /dev/slot0 1 0 "Hello, Kernel!"
+./user_apps/message_sender /dev/slot0 1 0 "Hello, Kernel!"
 ```
 - Device: `/dev/slot0`
 - Channel: `1`
@@ -256,32 +583,32 @@ sudo chmod 666 /dev/slot0 /dev/slot1
 
 **4. Read the Message:**
 ```bash
-./message_reader /dev/slot0 1
+./user_apps/message_reader /dev/slot0 1
 ```
 Output: `Hello, Kernel!`
 
 **5. Send with Censorship:**
 ```bash
-./message_sender /dev/slot0 1 1 "ABCDEFGHIJKLMNOP"
+./user_apps/message_sender /dev/slot0 1 1 "ABCDEFGHIJKLMNOP"
 ```
 - Censorship: `1` (enabled)
 - Every 4th character (indices 3, 7, 11, 15) becomes '#'
 
 **6. Read Censored Message:**
 ```bash
-./message_reader /dev/slot0 1
+./user_apps/message_reader /dev/slot0 1
 ```
 Output: `ABC#EFG#IJK#MNO#`
 
 **7. Test Multiple Channels:**
 ```bash
-./message_sender /dev/slot0 1 0 "Channel 1"
-./message_sender /dev/slot0 2 0 "Channel 2"
-./message_sender /dev/slot0 3 0 "Channel 3"
+./user_apps/message_sender /dev/slot0 1 0 "Channel 1"
+./user_apps/message_sender /dev/slot0 2 0 "Channel 2"
+./user_apps/message_sender /dev/slot0 3 0 "Channel 3"
 
-./message_reader /dev/slot0 1  # Outputs: Channel 1
-./message_reader /dev/slot0 2  # Outputs: Channel 2
-./message_reader /dev/slot0 3  # Outputs: Channel 3
+./user_apps/message_reader /dev/slot0 1  # Outputs: Channel 1
+./user_apps/message_reader /dev/slot0 2  # Outputs: Channel 2
+./user_apps/message_reader /dev/slot0 3  # Outputs: Channel 3
 ```
 
 **8. Unload the Module:**
@@ -311,19 +638,35 @@ sudo apt-get install linux-headers-$(uname -r)
 
 ```
 Kernel-Development-Lab/
-├── Linux_Kernel_Module/          # Main module directory
+├── src/                          # Kernel module source code
 │   ├── message_slot.c            # Kernel module implementation
-│   ├── message_slot.h            # Header with IOCTL definitions
-│   ├── message_sender.c          # User-space sender program
-│   ├── message_reader.c          # User-space reader program
-│   ├── Makefile                  # Build system
-│   └── instructions_kernel.txt   # Original assignment specification
+│   └── Makefile                  # Kernel build configuration
+├── include/                      # Header files
+│   └── message_slot.h            # IOCTL definitions and constants
+├── user_apps/                    # User-space applications
+│   ├── message_sender.c          # Message sender program
+│   └── message_reader.c          # Message reader program
+├── docs/                         # Documentation
+│   ├── instructions_kernel.txt   # Original assignment specification
+│   └── DESIGN_DECISIONS.md       # Architecture and design notes
+├── tests/                        # Test files and scripts
+│   └── README.md                 # Testing documentation
+├── Makefile                      # Root build system (builds everything)
 ├── README.md                     # This file
 ├── INTERVIEW_NOTES.md            # Technical decision documentation
 ├── LICENSE                       # MIT License + Academic Integrity Notice
+├── Dockerfile                    # Container for development/testing
 └── .github/
     └── copilot-instructions.md   # Coding standards for AI assistance
 ```
+
+### Directory Purposes
+
+- **`src/`**: Contains the kernel module source code (`message_slot.c`) and its build configuration
+- **`include/`**: Shared header files used by both kernel module and user applications
+- **`user_apps/`**: User-space programs for interacting with the message slot device
+- **`docs/`**: Project documentation, specifications, and design decisions
+- **`tests/`**: Test files and testing documentation
 
 ---
 
@@ -389,4 +732,4 @@ This is a portfolio project and not accepting contributions. However, feel free 
 
 ---
 
-**Note**: This README provides comprehensive documentation for technical interviews and portfolio reviews. For the original assignment specification, see `Linux_Kernel_Module/instructions_kernel.txt`.
+**Note**: This README provides comprehensive documentation for technical interviews and portfolio reviews. For the original assignment specification, see `docs/instructions_kernel.txt`.

@@ -115,3 +115,10 @@ Module.symvers
 # User-space programs from kernel module
 Linux_Kernel_Module/message_sender
 Linux_Kernel_Module/message_reader
+
+# User-space programs in new structure
+user_apps/message_sender
+user_apps/message_reader
+
+# Kernel module in root
+message_slot.ko

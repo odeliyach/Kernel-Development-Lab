@@ -18,7 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/ioctl.h>
-#include "message_slot.h"
+#include "../include/message_slot.h"
 
 /**
  * @brief Main function for the message reader program
