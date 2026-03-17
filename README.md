@@ -692,7 +692,7 @@ See the [LICENSE](./LICENSE) file for the full Academic Integrity Notice.
 
 This project is licensed under the MIT License with an Academic Integrity Notice.
 
-**Copyright (c) 2026 Odeliya Cohen**
+**Copyright (c) 2026 Odeliya Caritonova**
 
 See [LICENSE](./LICENSE) for full terms and the Academic Integrity Notice.
 
