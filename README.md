@@ -1,3 +1,4 @@
+<div align="center">
 # Linux Kernel Message Slot Module
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
@@ -5,6 +6,7 @@
 [![Language](https://img.shields.io/badge/Language-C-blue.svg)]()
 
 > A Linux kernel module implementing a character device driver for inter-process communication (IPC) via message slots with multiple concurrent channels.
+</div>
 ---
 
 ## 🎯 Project Overview
