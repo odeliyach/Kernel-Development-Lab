@@ -8,7 +8,7 @@
 
 > A Linux kernel module implementing a character device driver for inter-process communication (IPC) via message slots with multiple concurrent channels.
 </div>
----
+
 
 ## 🎯 Project Overview
 
