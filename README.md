@@ -700,6 +700,7 @@ See [LICENSE](./LICENSE) for full terms and the Academic Integrity Notice.
 
 **Note**: This README provides comprehensive documentation for technical interviews and portfolio reviews. For the original assignment specification, see `docs/instructions_kernel.txt`.
 
+---
 <div align="center">
 
 Built by **Odeliya Charitonova** · [GitHub](https://github.com/odeliyach) · [LinkedIn](https://linkedin.com/in/odeliya-charitonova)
