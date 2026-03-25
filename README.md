@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Kernel](https://img.shields.io/badge/Linux%20Kernel-5.x%2B-orange.svg)]()
 [![Language](https://img.shields.io/badge/Language-C-blue.svg)]()
-
+<a href="https://github.com/odeliyach/Network-Infrastructure-C/actions"><img src="https://github.com/odeliyach/Network-Infrastructure-C/actions/workflows/ci.yml/badge.svg"></a>
 > A Linux kernel module implementing a character device driver for inter-process communication (IPC) via message slots with multiple concurrent channels.
 </div>
 
