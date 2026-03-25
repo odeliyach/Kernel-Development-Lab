@@ -2,10 +2,12 @@
    
 # Linux Kernel Message Slot Module
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![Kernel](https://img.shields.io/badge/Linux%20Kernel-5.x%2B-orange.svg)]()
-[![Language](https://img.shields.io/badge/Language-C-blue.svg)]()
-<a href="https://github.com/odeliyach/Network-Infrastructure-C/actions"><img src="https://github.com/odeliyach/Network-Infrastructure-C/actions/workflows/ci.yml/badge.svg"></a>
+<p align="center">
+  <a href="https://github.com/odeliyach/Network-Infrastructure-C/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/odeliyach/Network-Infrastructure-C/ci.yml?label=CI&color=BAFFC9&logo=github-actions&logoColor=white" alt="CI"></a>
+  <img src="https://img.shields.io/badge/Linux%20Kernel-5.x%2B-B2B2FD?logo=linux&logoColor=white" alt="Kernel">
+  <img src="https://img.shields.io/badge/Language-C-B2B2FD?logo=c&logoColor=white" alt="C">
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-E2E2E2" alt="License"></a>
+</p>
 > A Linux kernel module implementing a character device driver for inter-process communication (IPC) via message slots with multiple concurrent channels.
 </div>
 
